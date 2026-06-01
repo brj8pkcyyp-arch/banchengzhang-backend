@@ -2,19 +2,64 @@ import type { NextApiRequest, NextApiResponse } from 'next';
 
 /**
  * POST /api/chat
- * 接收 App 请求 → 验证试用码 → 转发 DeepSeek API → 返回流式响应
+ * 接收 App 请求 → 验证试用码 → 拼接分龄系统提示词 → 转发 DeepSeek API → 返回流式响应
  */
+
+// 分龄语气指令
+const AGE_GROUP_PROMPTS: Record<string, string> = {
+  '3-6': `当前家长的孩子年龄在3-6岁。请用以下风格回复：
+- 语气温柔哄劝，像幼儿园老师一样亲切
+- 用简单易懂的语言，多用比喻和拟人
+- 多鼓励家长"你已经做得很好了"
+- 建议具体可操作，比如"试试和孩子一起画画时聊天"
+- 可以适当用叠词和可爱的语气词（如"宝贝""乖乖"）`,
+  '6-9': `当前家长的孩子年龄在6-9岁。请用以下风格回复：
+- 语气理性引导，像一个经验丰富的班主任
+- 关注学习习惯培养、作业辅导、规则建立
+- 建议实用具体，比如"试试番茄钟法：25分钟学习+5分钟休息"
+- 帮助家长理解孩子的心理，如"这个年龄的孩子需要掌控感"
+- 可以引用一些简单的教育心理学原理`,
+  '9-12': `当前家长的孩子年龄在9-12岁。请用以下风格回复：
+- 语气理解洞察，像一个知心的朋友
+- 关注青春期前奏：自尊心、同伴关系、学业压力
+- 尊重孩子的独立性，建议家长"多倾听少说教"
+- 帮助家长识别孩子的情绪信号
+- 适当深入分析问题根源，但保持简洁`,
+  '12-15': `当前家长的孩子年龄在12-15岁。请用以下风格回复：
+- 语气尊重包容，给孩子和父母都留空间
+- 关注青春期特点：叛逆、自我认同、社交压力
+- 强调"平等对话"而非"管教"，建议"试着把孩子当朋友聊"
+- 避免居高临下的建议，多用"你觉得呢？""我想听听你的想法"
+- 涉及敏感话题（早恋、网络、抽烟等）时态度开放不评判`,
+};
+
+const BASE_SYSTEM_PROMPT = `你是「静静姐姐」，一个温暖、专业、有耐心的AI育儿伙伴。
+
+你的特点：
+- 说话温柔亲切，像一个关心孩子的知心姐姐
+- 用emoji让对话更生动，但不要过多
+- 育儿建议实用可操作，不说空话
+- 回复简洁，控制在150字以内
+- 当孩子有心理困扰时，认真倾听并引导
+
+注意事项：
+- 你只能聊育儿相关话题（亲子关系、孩子情绪、学习习惯、成长问题）
+- 如果用户聊无关话题，温柔引导回育儿话题
+- 遇到高危情况（孩子自伤、家暴等），建议寻求专业帮助，提供热线：400-161-9995、12349（老年人/妇女儿童）、12355（青少年心理）
+- 不要给医疗诊断，遇到健康问题建议就医
+
+`;
+
 export default async function handler(
   req: NextApiRequest,
   res: NextApiResponse,
 ) {
-  // 只接受 POST 请求
   if (req.method !== 'POST') {
     return res.status(405).json({ error: '只支持 POST 请求' });
   }
 
   try {
-    const { messages, trialCode, model = 'deepseek-chat' } = req.body;
+    const { messages, trialCode, ageGroup, model = 'deepseek-chat' } = req.body;
 
     // 1. 验证试用码
     const validCodes = (process.env.TRIAL_CODES || '').split(',').map(c => c.trim()).filter(Boolean);
@@ -28,7 +73,16 @@ export default async function handler(
       return res.status(500).json({ error: '服务器配置错误，请联系管理员' });
     }
 
-    // 3. 调用 DeepSeek API（流式）
+    // 3. 拼接系统提示词（基础 + 分龄）
+    const agePrompt = AGE_GROUP_PROMPTS[ageGroup] || AGE_GROUP_PROMPTS['6-9'];
+    const systemPrompt = BASE_SYSTEM_PROMPT + '\n' + agePrompt;
+
+    const finalMessages = [
+      { role: 'system', content: systemPrompt },
+      ...(messages || []),
+    ];
+
+    // 4. 调用 DeepSeek API（流式）
     const deepseekRes = await fetch('https://api.deepseek.com/chat/completions', {
       method: 'POST',
       headers: {
@@ -37,7 +91,7 @@ export default async function handler(
       },
       body: JSON.stringify({
         model,
-        messages,
+        messages: finalMessages,
         stream: true,
       }),
     });
@@ -48,7 +102,7 @@ export default async function handler(
       return res.status(deepseekRes.status).json({ error: 'AI 服务暂时不可用，请稍后再试' });
     }
 
-    // 4. 转发流式响应给 App
+    // 5. 转发流式响应给 App
     res.setHeader('Content-Type', 'text/event-stream');
     res.setHeader('Cache-Control', 'no-cache');
     res.setHeader('Connection', 'keep-alive');
