@@ -9,7 +9,7 @@ export default async function handler(
   res: NextApiResponse,
 ) {
   // 只接受 POST 请求
-  if (req.method !) {
+  if (req.method !== 'POST') {
     return res.status(405).json({ error: '只支持 POST 请求' });
   }
 
@@ -38,7 +38,7 @@ export default async function handler(
       body: JSON.stringify({
         model,
         messages,
-        stream: true, // 启用流式返回
+        stream: true,
       }),
     });
 
@@ -53,7 +53,6 @@ export default async function handler(
     res.setHeader('Cache-Control', 'no-cache');
     res.setHeader('Connection', 'keep-alive');
 
-    // 读取 DeepSeek 的流式数据，原样转发给 App
     const reader = deepseekRes.body?.getReader();
     if (!reader) {
       return res.status(500).json({ error: '流式读取失败' });
@@ -64,7 +63,7 @@ export default async function handler(
       const { done, value } = await reader.read();
       if (done) break;
       const chunk = decoder.decode(value);
-      res.write(chunk); // 原样转发每一块数据
+      res.write(chunk);
     }
     res.end();
 
@@ -73,10 +72,3 @@ export default async function handler(
     return res.status(500).json({ error: '服务器内部错误，请稍后重试' });
   }
 }
-
-// 关闭 Next.js 的默认 bodyParser，让我们自己处理流式数据
-export const config = {
-  api: {
-    bodyParser: false,
-  },
-};
