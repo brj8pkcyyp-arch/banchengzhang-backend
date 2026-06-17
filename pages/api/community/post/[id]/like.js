@@ -1,5 +1,5 @@
 // POST /api/community/post/[id]/like - 点赞/取消点赞
-import sql from '../../../../../../lib/db';
+import sql from '../../../../../lib/db';
 
 async function toggleLike(req, res, postId) {
   // 检查帖子是否存在

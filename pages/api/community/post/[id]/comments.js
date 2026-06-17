@@ -1,5 +1,5 @@
 // GET /api/community/post/[id]/comments - 获取帖子评论列表
-import sql from '../../../../../../lib/db';
+import sql from '../../../../../lib/db';
 
 async function getComments(req, res, postId) {
   const rows = await sql`
